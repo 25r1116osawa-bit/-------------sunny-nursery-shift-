@@ -1,0 +1,16 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-50 text-gray-900;
+  font-family: 'Inter', 'Noto Sans JP', sans-serif;
+}
+
+.timeline-grid {
+  display: grid;
+  grid-template-columns: 150px repeat(28, 1fr);
+}
+
+/* Next.js specific layout resets or additions can go here */
