@@ -1,7 +1,5 @@
 
-'use client';
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -11,9 +9,12 @@ import {
   Users, 
   AlertCircle,
   Clock,
-  LayoutGrid
+  LayoutGrid,
+  Share2,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
-import { Staff, EmploymentType, Shift, DayRequirement } from '../lib/types';
+import { Staff, EmploymentType, Shift, DayRequirement } from '../types';
 import { 
   START_HOUR, 
   END_HOUR, 
@@ -21,15 +22,18 @@ import {
   MOCK_HOLIDAYS, 
   INITIAL_STAFF, 
   STAFF_COLORS 
-} from '../lib/constants';
+} from '../constants';
 import { getWeekDays, formatDate, isWeekend, getShiftPosition } from '../lib/utils';
+import { auth } from '../firebase';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { syncShiftsToGoogleCalendar } from '../services/googleCalendarService';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 type ViewMode = 'WEEK' | 'DAY';
 
-export default function ShiftManagerPage() {
-  const [staff, setStaff] = useState<Staff[]>(INITIAL_STAFF);
+export default function ShiftManager() {
+  const [staff, setStaff] = useState<Staff[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [requirements, setRequirements] = useState<DayRequirement[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -37,6 +41,58 @@ export default function ShiftManagerPage() {
   const [selectedEmploymentType, setSelectedEmploymentType] = useState<EmploymentType | 'ALL'>('ALL');
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showShiftModal, setShowShiftModal] = useState<{staff: Staff, date: string} | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    const savedStaff = localStorage.getItem('hoikuen_staff');
+    const savedShifts = localStorage.getItem('hoikuen_shifts');
+    const savedReqs = localStorage.getItem('hoikuen_requirements');
+
+    if (savedStaff) setStaff(JSON.parse(savedStaff));
+    else setStaff(INITIAL_STAFF);
+
+    if (savedShifts) setShifts(JSON.parse(savedShifts));
+    if (savedReqs) setRequirements(JSON.parse(savedReqs));
+
+    setIsLoading(false);
+  }, []);
+
+  // Save to localStorage when state changes
+  useEffect(() => {
+    if (!isLoading) {
+      localStorage.setItem('hoikuen_staff', JSON.stringify(staff));
+      localStorage.setItem('hoikuen_shifts', JSON.stringify(shifts));
+      localStorage.setItem('hoikuen_requirements', JSON.stringify(requirements));
+    }
+  }, [staff, shifts, requirements, isLoading]);
+
+  const handleGoogleSync = async () => {
+    setIsSyncing(true);
+    setSyncSuccess(false);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.addScope('https://www.googleapis.com/auth/calendar');
+      
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+
+      if (token) {
+        await syncShiftsToGoogleCalendar(token, shifts, staff);
+        setSyncSuccess(true);
+        setTimeout(() => setSyncSuccess(false), 3000);
+      }
+    } catch (error) {
+      console.error('Sync error:', error);
+      alert('Googleカレンダーとの同期に失敗しました。');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
   const activeDateStr = useMemo(() => formatDate(currentDate), [currentDate]);
@@ -112,36 +168,44 @@ export default function ShiftManagerPage() {
     setCurrentDate(newDate);
   };
 
+  if (isLoading) {
+    return (
+      <div className="h-96 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-400"></div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen pb-20">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
+    <div className="min-h-screen pb-20 bg-[#fdfbf7]">
+      <header className="bg-white border-b border-orange-100 sticky top-0 z-30 shadow-sm">
         <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-orange-500 p-2 rounded-lg text-white">
+            <div className="bg-orange-400 p-2 rounded-lg text-white">
               <CalendarIcon size={24} />
             </div>
-            <h1 className="text-xl font-bold text-gray-800 hidden sm:block">保育園 シフト管理</h1>
+            <h1 className="text-xl font-bold text-gray-800 hidden sm:block font-kiwi">シフト管理</h1>
           </div>
           
           <div className="flex items-center gap-4">
-            <div className="flex bg-gray-100 rounded-lg p-1 mr-2">
+            <div className="flex bg-orange-50 rounded-lg p-1 mr-2">
               <button 
                 onClick={() => setViewMode('WEEK')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'WEEK' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'WEEK' ? 'bg-white text-orange-500 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 <LayoutGrid size={16} />
                 週間
               </button>
               <button 
                 onClick={() => setViewMode('DAY')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'DAY' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'DAY' ? 'bg-white text-orange-500 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 <Clock size={16} />
                 日別
               </button>
             </div>
 
-            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+            <div className="flex items-center bg-orange-50 rounded-lg p-1">
               <button onClick={() => navigate(-1)} className="p-1.5 hover:bg-white rounded-md transition-colors"><ChevronLeft size={20} /></button>
               <span className="px-3 font-medium text-sm whitespace-nowrap min-w-[140px] text-center">
                 {viewMode === 'WEEK' ? `${formatDate(weekDays[0])} 〜 ${formatDate(weekDays[6])}` : activeDateStr}
@@ -149,8 +213,27 @@ export default function ShiftManagerPage() {
               <button onClick={() => navigate(1)} className="p-1.5 hover:bg-white rounded-md transition-colors"><ChevronRight size={20} /></button>
             </div>
             <button 
+              onClick={handleGoogleSync}
+              disabled={isSyncing}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all ${
+                syncSuccess 
+                ? 'bg-green-500 text-white' 
+                : 'bg-white border border-orange-200 text-orange-500 hover:bg-orange-50'
+              } disabled:opacity-70`}
+            >
+              {isSyncing ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : syncSuccess ? (
+                <CheckCircle2 size={18} />
+              ) : (
+                <Share2 size={18} />
+              )}
+              {isSyncing ? '同期中...' : syncSuccess ? '同期完了' : 'Googleカレンダー連携'}
+            </button>
+
+            <button 
               onClick={() => setShowStaffModal(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors"
+              className="bg-orange-400 hover:bg-orange-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors"
             >
               <Plus size={18} /> 職員追加
             </button>
@@ -160,12 +243,12 @@ export default function ShiftManagerPage() {
 
       <main className="max-w-[1600px] mx-auto px-4 mt-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div className="flex bg-white border border-gray-200 rounded-xl p-1 w-fit shadow-sm">
+          <div className="flex bg-white border border-orange-100 rounded-xl p-1 w-fit shadow-sm">
             {(['ALL', ...Object.values(EmploymentType)] as const).map(type => (
               <button
                 key={type}
                 onClick={() => setSelectedEmploymentType(type)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${selectedEmploymentType === type ? 'bg-blue-50 text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${selectedEmploymentType === type ? 'bg-orange-50 text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 {type === 'ALL' ? '全員表示' : type}
               </button>
@@ -175,18 +258,18 @@ export default function ShiftManagerPage() {
         </div>
 
         {viewMode === 'WEEK' ? (
-          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-white border border-orange-100 rounded-2xl shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <div className="min-w-[1200px]">
-                <div className="grid grid-cols-[200px_repeat(7,1fr)] bg-gray-50 border-b border-gray-200">
-                  <div className="p-4 font-bold text-gray-600 border-r border-gray-200 flex items-center justify-center">時間 / 日</div>
+                <div className="grid grid-cols-[200px_repeat(7,1fr)] bg-orange-50/30 border-b border-orange-100">
+                  <div className="p-4 font-bold text-gray-600 border-r border-orange-100 flex items-center justify-center">時間 / 日</div>
                   {weekDays.map((date) => {
                     const dateStr = formatDate(date);
                     const holiday = MOCK_HOLIDAYS.find(h => h.date === dateStr);
                     const weekend = isWeekend(date);
                     const staffing = getStaffingLevel(dateStr);
                     return (
-                      <div key={dateStr} className={`p-3 text-center border-r border-gray-200 last:border-0 ${holiday || weekend ? 'bg-orange-50' : ''}`}>
+                      <div key={dateStr} className={`p-3 text-center border-r border-orange-100 last:border-0 ${holiday || weekend ? 'bg-orange-50' : ''}`}>
                         <div className="text-xs font-bold text-gray-500 uppercase">{['日', '月', '火', '水', '木', '金', '土'][date.getDay()]}</div>
                         <div className={`text-lg font-bold ${holiday ? 'text-red-500' : weekend ? 'text-blue-500' : 'text-gray-800'}`}>{date.getDate()}</div>
                         {holiday && <div className="text-[10px] text-red-400 font-bold truncate">{holiday.name}</div>}
@@ -198,10 +281,10 @@ export default function ShiftManagerPage() {
                     );
                   })}
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-orange-50">
                   {filteredStaff.map(member => (
-                    <div key={member.id} className="grid grid-cols-[200px_repeat(7,1fr)] group hover:bg-gray-50 transition-colors">
-                      <div className="p-4 border-r border-gray-200 flex flex-col gap-1">
+                    <div key={member.id} className="grid grid-cols-[200px_repeat(7,1fr)] group hover:bg-orange-50/30 transition-colors">
+                      <div className="p-4 border-r border-orange-100 flex flex-col gap-1">
                         <div className="flex items-center justify-between"><span className="font-bold text-gray-800">{member.name}</span><button onClick={() => deleteStaff(member.id)} className="p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button></div>
                         <span className={`text-[10px] w-fit px-2 py-0.5 rounded-full font-medium ${member.type === EmploymentType.FULL_TIME ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{member.type}</span>
                       </div>
@@ -209,13 +292,13 @@ export default function ShiftManagerPage() {
                         const dateStr = formatDate(date);
                         const shift = shifts.find(s => s.staffId === member.id && s.date === dateStr);
                         return (
-                          <div key={dateStr} className="p-2 border-r border-gray-100 last:border-0 relative h-20 flex flex-col items-center justify-center cursor-pointer" onClick={() => setShowShiftModal({ staff: member, date: dateStr })}>
+                          <div key={dateStr} className="p-2 border-r border-orange-50 last:border-0 relative h-20 flex flex-col items-center justify-center cursor-pointer" onClick={() => setShowShiftModal({ staff: member, date: dateStr })}>
                             {shift ? (
                               <div className="w-full h-12 rounded-lg flex flex-col items-center justify-center text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: member.color }}>
                                 <div>{shift.startTime}</div><div className="h-0.5 w-4 bg-white/50 my-0.5"></div><div>{shift.endTime}</div>
                               </div>
                             ) : (
-                              <div className="w-full h-12 border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"><Plus size={16} className="text-gray-300" /></div>
+                              <div className="w-full h-12 border-2 border-dashed border-orange-100 rounded-lg flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"><Plus size={16} className="text-orange-200" /></div>
                             )}
                           </div>
                         );
@@ -227,8 +310,8 @@ export default function ShiftManagerPage() {
             </div>
           </div>
         ) : (
-          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+          <div className="bg-white border border-orange-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-orange-50 flex items-center justify-between bg-orange-50/20">
               <div className="flex items-center gap-4">
                 <h2 className="text-lg font-bold text-gray-800">{activeDateStr} の勤務表</h2>
                 {MOCK_HOLIDAYS.find(h => h.date === activeDateStr) && (
@@ -236,7 +319,7 @@ export default function ShiftManagerPage() {
                 )}
               </div>
               <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2 text-sm font-medium text-gray-500">正社員必要数: <input type="number" min="0" className="w-12 px-2 py-1 border border-gray-200 rounded bg-white text-center focus:outline-none focus:ring-2 focus:ring-blue-500" value={getRequirementForDate(activeDateStr)} onChange={(e) => setRequirementForDate(activeDateStr, parseInt(e.target.value) || 0)}/></div>
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-500">正社員必要数: <input type="number" min="0" className="w-12 px-2 py-1 border border-orange-100 rounded bg-white text-center focus:outline-none focus:ring-2 focus:ring-orange-400" value={getRequirementForDate(activeDateStr)} onChange={(e) => setRequirementForDate(activeDateStr, parseInt(e.target.value) || 0)}/></div>
                 {(() => {
                   const staffing = getStaffingLevel(activeDateStr);
                   return <div className={`px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 ${staffing.isMet ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{staffing.isMet ? '充足' : '不足'} : {staffing.count} / {staffing.req} 名</div>;
@@ -245,29 +328,29 @@ export default function ShiftManagerPage() {
             </div>
             <div className="overflow-x-auto">
               <div className="min-w-[1000px] relative">
-                <div className="grid grid-cols-[200px_1fr] bg-gray-50 border-b border-gray-200">
-                  <div className="p-4 border-r border-gray-200 text-center text-xs font-bold text-gray-500">職員名</div>
+                <div className="grid grid-cols-[200px_1fr] bg-orange-50/10 border-b border-orange-100">
+                  <div className="p-4 border-r border-orange-100 text-center text-xs font-bold text-gray-500">職員名</div>
                   <div className="relative h-12 flex">
-                    {TIME_SLOTS.filter((_, i) => i % 2 === 0).map((hour) => (<div key={hour} className="flex-1 border-l border-gray-200 text-[10px] text-gray-400 pl-1 pt-1">{hour}</div>))}
+                    {TIME_SLOTS.filter((_, i) => i % 2 === 0).map((hour) => (<div key={hour} className="flex-1 border-l border-orange-100 text-[10px] text-gray-400 pl-1 pt-1">{hour}</div>))}
                   </div>
                 </div>
-                <div className="divide-y divide-gray-100 relative">
+                <div className="divide-y divide-orange-50 relative">
                   <div className="absolute inset-y-0 left-[200px] right-0 grid grid-cols-14 pointer-events-none">
-                    {Array.from({ length: 14 }).map((_, i) => (<div key={i} className="border-l border-gray-50 last:border-r h-full"></div>))}
+                    {Array.from({ length: 14 }).map((_, i) => (<div key={i} className="border-l border-orange-50 last:border-r h-full"></div>))}
                   </div>
                   {filteredStaff.map(member => {
                     const shift = shifts.find(s => s.staffId === member.id && s.date === activeDateStr);
                     const position = shift ? getShiftPosition(shift.startTime, shift.endTime, START_HOUR, END_HOUR) : null;
                     return (
-                      <div key={member.id} className="grid grid-cols-[200px_1fr] min-h-[64px] group hover:bg-gray-50/50 transition-colors">
-                        <div className="p-3 border-r border-gray-200 flex flex-col justify-center"><span className="font-bold text-gray-800 text-sm">{member.name}</span><span className="text-[9px] text-gray-400 mt-0.5">{member.type}</span></div>
+                      <div key={member.id} className="grid grid-cols-[200px_1fr] min-h-[64px] group hover:bg-orange-50/10 transition-colors">
+                        <div className="p-3 border-r border-orange-100 flex flex-col justify-center"><span className="font-bold text-gray-800 text-sm">{member.name}</span><span className="text-[9px] text-gray-400 mt-0.5">{member.type}</span></div>
                         <div className="relative h-full flex items-center px-0 cursor-pointer" onClick={() => setShowShiftModal({ staff: member, date: activeDateStr })}>
                           {shift ? (
                             <div className="absolute h-10 rounded-lg flex items-center justify-between px-3 text-[10px] font-bold text-white shadow-md hover:brightness-105 transition-all z-10" style={{ backgroundColor: member.color, left: position?.left, width: position?.width }}>
                               <span className="truncate">{shift.startTime}</span><span className="truncate">{shift.endTime}</span>
                             </div>
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><span className="text-gray-300 text-xs flex items-center gap-1 font-medium"><Plus size={14}/> シフト追加</span></div>
+                            <div className="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><span className="text-orange-200 text-xs flex items-center gap-1 font-medium"><Plus size={14}/> シフト追加</span></div>
                           )}
                         </div>
                       </div>
@@ -283,11 +366,11 @@ export default function ShiftManagerPage() {
       {showStaffModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-blue-50/50"><h2 className="text-xl font-bold text-gray-800">職員の追加</h2><button onClick={() => setShowStaffModal(false)} className="text-gray-400 hover:text-gray-600"><AlertCircle size={24} className="rotate-45" /></button></div>
+            <div className="p-6 border-b border-orange-50 flex items-center justify-between bg-orange-50/30"><h2 className="text-xl font-bold text-gray-800 font-kiwi">職員の追加</h2><button onClick={() => setShowStaffModal(false)} className="text-gray-400 hover:text-gray-600"><AlertCircle size={24} className="rotate-45" /></button></div>
             <form onSubmit={(e) => { e.preventDefault(); const formData = new FormData(e.currentTarget); addStaff(formData.get('name') as string, formData.get('type') as EmploymentType); }} className="p-6 space-y-4">
-              <div><label className="block text-sm font-bold text-gray-700 mb-1">名前</label><input name="name" required className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all" placeholder="例: 大澤 沙織" /></div>
-              <div><label className="block text-sm font-bold text-gray-700 mb-1">雇用形態</label><select name="type" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all bg-white">{Object.values(EmploymentType).map(type => <option key={type} value={type}>{type}</option>)}</select></div>
-              <div className="pt-4 flex gap-3"><button type="button" onClick={() => setShowStaffModal(false)} className="flex-1 px-4 py-3 border border-gray-200 rounded-xl font-bold text-gray-600 hover:bg-gray-50 transition-colors">キャンセル</button><button type="submit" className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-200 transition-all">追加する</button></div>
+              <div><label className="block text-sm font-bold text-gray-700 mb-1">名前</label><input name="name" required className="w-full px-4 py-3 border border-orange-100 rounded-xl focus:ring-2 focus:ring-orange-400 focus:outline-none transition-all" placeholder="例: 大澤 沙織" /></div>
+              <div><label className="block text-sm font-bold text-gray-700 mb-1">雇用形態</label><select name="type" className="w-full px-4 py-3 border border-orange-100 rounded-xl focus:ring-2 focus:ring-orange-400 focus:outline-none transition-all bg-white">{Object.values(EmploymentType).map(type => <option key={type} value={type}>{type}</option>)}</select></div>
+              <div className="pt-4 flex gap-3"><button type="button" onClick={() => setShowStaffModal(false)} className="flex-1 px-4 py-3 border border-orange-100 rounded-xl font-bold text-gray-600 hover:bg-gray-50 transition-colors">キャンセル</button><button type="submit" className="flex-1 px-4 py-3 bg-orange-400 hover:bg-orange-500 text-white rounded-xl font-bold shadow-lg shadow-orange-200 transition-all">追加する</button></div>
             </form>
           </div>
         </div>
@@ -296,16 +379,16 @@ export default function ShiftManagerPage() {
       {showShiftModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-gray-100 bg-gray-50 flex items-center justify-between"><div><h2 className="text-xl font-bold text-gray-800">{showShiftModal.staff.name}</h2><p className="text-sm text-gray-500">{showShiftModal.date} のシフト設定</p></div><button onClick={() => setShowShiftModal(null)} className="text-gray-400 hover:text-gray-600"><AlertCircle size={24} className="rotate-45" /></button></div>
+            <div className="p-6 border-b border-orange-50 bg-orange-50/30 flex items-center justify-between"><div><h2 className="text-xl font-bold text-gray-800 font-kiwi">{showShiftModal.staff.name}</h2><p className="text-sm text-gray-500">{showShiftModal.date} のシフト設定</p></div><button onClick={() => setShowShiftModal(null)} className="text-gray-400 hover:text-gray-600"><AlertCircle size={24} className="rotate-45" /></button></div>
             <form onSubmit={(e) => { e.preventDefault(); const formData = new FormData(e.currentTarget); upsertShift(showShiftModal.staff.id, showShiftModal.date, formData.get('start') as string, formData.get('end') as string); }} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-bold text-gray-700 mb-1">開始時間</label><select name="start" defaultValue={shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date)?.startTime || "09:00"} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">{TIME_SLOTS.map(slot => <option key={slot} value={slot}>{slot}</option>)}</select></div>
-                <div><label className="block text-sm font-bold text-gray-700 mb-1">終了時間</label><select name="end" defaultValue={shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date)?.endTime || "18:00"} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">{TIME_SLOTS.map(slot => <option key={slot} value={slot}>{slot}</option>)}</select></div>
+                <div><label className="block text-sm font-bold text-gray-700 mb-1">開始時間</label><select name="start" defaultValue={shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date)?.startTime || "09:00"} className="w-full px-4 py-3 border border-orange-100 rounded-xl focus:ring-2 focus:ring-orange-400 focus:outline-none bg-white">{TIME_SLOTS.map(slot => <option key={slot} value={slot}>{slot}</option>)}</select></div>
+                <div><label className="block text-sm font-bold text-gray-700 mb-1">終了時間</label><select name="end" defaultValue={shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date)?.endTime || "18:00"} className="w-full px-4 py-3 border border-orange-100 rounded-xl focus:ring-2 focus:ring-orange-400 focus:outline-none bg-white">{TIME_SLOTS.map(slot => <option key={slot} value={slot}>{slot}</option>)}</select></div>
               </div>
               <div className="pt-4 flex flex-col gap-3">
-                <button type="submit" className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-200">{shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date) ? '更新する' : '保存する'}</button>
+                <button type="submit" className="w-full px-4 py-3 bg-orange-400 hover:bg-orange-500 text-white rounded-xl font-bold shadow-lg shadow-orange-200">{shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date) ? '更新する' : '保存する'}</button>
                 {shifts.find(s => s.staffId === showShiftModal.staff.id && s.date === showShiftModal.date) && (<button type="button" onClick={() => deleteShift(showShiftModal.staff.id, showShiftModal.date)} className="w-full px-4 py-3 text-red-600 font-bold hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-2"><Trash2 size={18} /> シフトを削除</button>)}
-                <button type="button" onClick={() => setShowShiftModal(null)} className="w-full px-4 py-3 border border-gray-200 rounded-xl font-bold text-gray-500 hover:bg-gray-50">閉じる</button>
+                <button type="button" onClick={() => setShowShiftModal(null)} className="w-full px-4 py-3 border border-orange-100 rounded-xl font-bold text-gray-500 hover:bg-gray-50">閉じる</button>
               </div>
             </form>
           </div>

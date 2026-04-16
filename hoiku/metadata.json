@@ -1,0 +1,9 @@
+{
+  "name": "保育園・でんわ帳 (Nursery Call Log)",
+  "description": "保育園向けの電話応対履歴管理システム。AIによる内容要約や感情分析、クラス別の履歴管理が可能です。",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "D7": [],
+  "Yp": []
+}
