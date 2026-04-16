@@ -83,9 +83,6 @@ const HistoryView: React.FC<HistoryViewProps> = ({ logs, onUpdateStatus }) => {
               <p className="text-gray-600 text-sm leading-relaxed whitespace-pre-wrap">{log.content}</p>
               
               <div className="flex flex-wrap items-center gap-2 pt-2 text-[10px] text-gray-400 font-bold">
-                <span>記録者: {log.recordedBy}</span>
-                <span>•</span>
-                <span>ID: {log.id.slice(0, 8)}</span>
               </div>
             </div>
 
